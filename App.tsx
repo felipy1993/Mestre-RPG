@@ -9,8 +9,14 @@ const GENRES = ["Fantasia Medieval", "Cyberpunk", "Horror Cósmico", "Steampunk"
 const RACES = ["Humano", "Elfo", "Anão", "Halfling", "Meio-Orc", "Draconato"];
 const CLASSES = ["Guerreiro", "Mago", "Ladino", "Clérigo", "Bardo", "Patrulheiro"];
 
-// Removed local Window interface declaration for aistudio to resolve duplicate declaration and modifier conflicts
-// as the AIStudio type is already globally provided in this environment.
+const STORAGE_KEYS = {
+  LOGS: 'rpg_logs_v1',
+  PARTY: 'rpg_party_v1',
+  STATE: 'rpg_state_v1',
+  OPTIONS: 'rpg_options_v1',
+  PENDING_ROLL: 'rpg_roll_v1',
+  ACTIVE_CHAR: 'rpg_active_char_v1'
+};
 
 const App: React.FC = () => {
   const [gameState, setGameState] = useState<GameState>(GameState.LANDING);
@@ -48,17 +54,34 @@ const App: React.FC = () => {
     class: false
   });
 
+  // Check for saved game on mount
   useEffect(() => {
-    const savedLogs = localStorage.getItem('rpg_logs');
-    const savedParty = localStorage.getItem('rpg_party');
+    const savedLogs = localStorage.getItem(STORAGE_KEYS.LOGS);
+    const savedParty = localStorage.getItem(STORAGE_KEYS.PARTY);
     if (savedLogs && savedParty) {
       setHasSavedGame(true);
     }
   }, []);
 
+  // Persistent saving of all relevant game states
+  useEffect(() => {
+    if (gameState === GameState.PLAYING || gameState === GameState.CHARACTER_CREATION) {
+      localStorage.setItem(STORAGE_KEYS.LOGS, JSON.stringify(logs));
+      localStorage.setItem(STORAGE_KEYS.PARTY, JSON.stringify(party));
+      localStorage.setItem(STORAGE_KEYS.STATE, gameState);
+      localStorage.setItem(STORAGE_KEYS.OPTIONS, JSON.stringify(currentOptions));
+      localStorage.setItem(STORAGE_KEYS.PENDING_ROLL, JSON.stringify(pendingRoll));
+      localStorage.setItem(STORAGE_KEYS.ACTIVE_CHAR, activeCharIndex.toString());
+    }
+  }, [logs, party, gameState, currentOptions, pendingRoll, activeCharIndex]);
+
+  useEffect(() => {
+    if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+  }, [logs, isTyping]);
+
   const handleSelectKey = async () => {
     try {
-      // @ts-ignore - aistudio is globally available and managed by the AI Studio environment
+      // @ts-ignore
       await window.aistudio.openSelectKey();
       setShowKeyInfo(false);
     } catch (e) {
@@ -68,19 +91,28 @@ const App: React.FC = () => {
 
   const startJourney = (continueGame: boolean) => {
     if (continueGame) {
-      const savedLogs = localStorage.getItem('rpg_logs');
-      const savedParty = localStorage.getItem('rpg_party');
+      const savedLogs = localStorage.getItem(STORAGE_KEYS.LOGS);
+      const savedParty = localStorage.getItem(STORAGE_KEYS.PARTY);
+      const savedState = localStorage.getItem(STORAGE_KEYS.STATE);
+      const savedOptions = localStorage.getItem(STORAGE_KEYS.OPTIONS);
+      const savedRoll = localStorage.getItem(STORAGE_KEYS.PENDING_ROLL);
+      const savedActiveChar = localStorage.getItem(STORAGE_KEYS.ACTIVE_CHAR);
+
       if (savedLogs && savedParty) {
         try {
           setLogs(JSON.parse(savedLogs));
           setParty(JSON.parse(savedParty));
-          setGameState(GameState.PLAYING);
+          setGameState((savedState as GameState) || GameState.PLAYING);
+          if (savedOptions) setCurrentOptions(JSON.parse(savedOptions));
+          if (savedRoll) setPendingRoll(JSON.parse(savedRoll));
+          if (savedActiveChar) setActiveCharIndex(parseInt(savedActiveChar, 10));
         } catch (e) {
+          console.error("Erro ao restaurar jogo:", e);
           initNewGame();
         }
       }
     } else {
-      localStorage.clear();
+      Object.values(STORAGE_KEYS).forEach(key => localStorage.removeItem(key));
       initNewGame();
     }
   };
@@ -97,15 +129,6 @@ const App: React.FC = () => {
       alert("Certifique-se de que sua chave de API está configurada corretamente.");
     }
   };
-
-  useEffect(() => {
-    if (logs.length > 0) localStorage.setItem('rpg_logs', JSON.stringify(logs));
-    if (party.length > 0) localStorage.setItem('rpg_party', JSON.stringify(party));
-  }, [logs, party]);
-
-  useEffect(() => {
-    if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-  }, [logs, isTyping]);
 
   const addLog = (log: Omit<GameLog, 'id' | 'timestamp'>) => {
     setLogs(prev => [...prev, { ...log, id: Math.random().toString(36).substr(2, 9), timestamp: Date.now() }]);
@@ -165,7 +188,6 @@ const App: React.FC = () => {
       }
     } catch (err: any) {
       setIsTyping(false);
-      // Handling "Requested entity was not found" error by prompting user to select key as per guidelines
       if (err.message?.includes("Requested entity was not found")) {
         addLog({ sender: 'dm', text: "A conexão com o Oráculo falhou. Por favor, selecione uma chave de API válida." });
         setShowKeyInfo(true);
@@ -237,7 +259,6 @@ const App: React.FC = () => {
   if (gameState === GameState.LANDING) {
     return (
       <div className="h-screen w-screen flex flex-col items-center justify-center p-6 relative overflow-hidden bg-[#0a0a0a]">
-        {/* Background Layer */}
         <div className="absolute inset-0 z-0 bg-[url('https://images.unsplash.com/photo-1514539079130-25950c84af65?auto=format&fit=crop&q=80&w=1920')] bg-cover bg-center opacity-20 scale-105 blur-[3px]"></div>
         
         <div className="z-10 text-center max-w-4xl animate-in fade-in zoom-in duration-1000 flex flex-col items-center">
@@ -340,7 +361,7 @@ const App: React.FC = () => {
         <div className="text-center mb-6">
           <h1 className="fantasy-font text-2xl font-black text-amber-500 gold-shadow leading-tight">MESTRE GEMINI</h1>
           <div className="flex justify-center gap-4 mt-2">
-            <button onClick={() => { if(confirm("Reiniciar aventura e equipe?")) { localStorage.clear(); window.location.reload(); } }} className="text-[9px] text-red-500 font-bold uppercase hover:text-red-400">Reiniciar</button>
+            <button onClick={() => { if(confirm("Reiniciar aventura e equipe? Isso apagará seu progresso salvo.")) { Object.values(STORAGE_KEYS).forEach(k => localStorage.removeItem(k)); window.location.reload(); } }} className="text-[9px] text-red-500 font-bold uppercase hover:text-red-400">Reiniciar</button>
             <button onClick={() => setShowKeyInfo(true)} className="text-[9px] text-amber-600 font-bold uppercase hover:text-amber-500">Chave API</button>
           </div>
         </div>
@@ -375,28 +396,6 @@ const App: React.FC = () => {
           </div>
         </div>
       </aside>
-
-      {showKeyInfo && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-6 bg-black/80 backdrop-blur-sm animate-in fade-in">
-          <div className="parchment-bg max-w-lg w-full p-8 rounded shadow-2xl relative border-2 border-amber-900/30">
-            <button onClick={() => setShowKeyInfo(false)} className="absolute top-4 right-4 text-stone-500 hover:text-stone-900">
-              <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
-            </button>
-            <h2 className="fantasy-font text-2xl font-black text-stone-900 mb-6">CONFIGURAÇÃO DE CHAVE</h2>
-            <div className="story-font text-stone-800 text-sm mb-8 space-y-2">
-              <p>Você pode trocar sua chave de API a qualquer momento para continuar sua jornada.</p>
-              <p className="font-bold">Como obter:</p>
-              <p>Visite o AI Studio, crie sua chave e use o botão abaixo.</p>
-            </div>
-            <button 
-              onClick={handleSelectKey}
-              className="w-full bg-stone-900 text-amber-500 py-4 rounded font-black border-2 border-amber-600 hover:bg-amber-600 hover:text-black transition-all uppercase tracking-widest text-sm"
-            >
-              Selecionar Nova Chave
-            </button>
-          </div>
-        </div>
-      )}
 
       <main className="flex-1 flex flex-col bg-transparent overflow-hidden relative">
         <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 md:p-8 space-y-6 scrollbar-hide">
